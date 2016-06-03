@@ -41,6 +41,7 @@ fi
 
 tmpdir=${PBS_TMPDIR:-${TMPDIR:-"/var/tmp"}}
 PBS_CURRENT_SCHEMA_VER='1.2.0'
+PBS_OSS_STARTING_MAJOR_VER='14.0'
 
 get_db_user() {
 	if [ ! -f "${dbuser_fl}" ]; then
@@ -706,6 +707,9 @@ echo "***"
 # Source pbs.conf to get paths: PBS_EXEC and PBS_HOME and PBS_START_*
 . $conf
 
+# Store the old PBS VERSION for later use
+old_pbs_version=`cat $PBS_HOME/pbs_version`
+
 # Ensure certain variables are set
 if [ -z "$PBS_EXEC" ]; then
 	echo "*** PBS_EXEC is not set"
@@ -869,6 +873,19 @@ if [ "${PBS_START_SERVER:-0}" != 0 ] ; then
 		if [ $ret -ne 0 ]; then
 			echo "Failed to upgrade PBS Datastore"
 			exit $ret
+		fi
+		# We need to regenerate the db_password file since we have changed encryption/decryption
+		# library from DES to AES in PBS Version PBS_OSS_STARTING_MAJOR_VER
+		if [ "$old_pbs_version" \< "${PBS_OSS_STARTING_MAJOR_VER}" ] ;then
+			rm -f  "${PBS_HOME}/server_priv/db_password"
+			err=`${PBS_EXEC}/sbin/pbs_ds_password -r`
+			if [ $? -ne 0 ]; then
+				echo $err
+				echo "Error setting password for PBS Data Service"
+				${server_ctl} stop > /dev/null 2>&1
+				cleanup
+				exit 1
+			fi
 		fi
 	else
 		# Upgrade from FS version to DB
